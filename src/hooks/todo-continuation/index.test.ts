@@ -2,6 +2,10 @@ import { describe, expect, mock, test } from 'bun:test';
 import { SLIM_INTERNAL_INITIATOR_MARKER } from '../../utils';
 import { createTodoContinuationHook } from './index';
 import {
+  SUBAGENT_CONTEXT_HYGIENE_INSTRUCTION_OPEN,
+  SUBAGENT_CONTEXT_HYGIENE_REMINDER,
+} from './subagent-context-hygiene';
+import {
   TODO_FINAL_ACTIVE_REMINDER,
   TODO_HYGIENE_REMINDER,
 } from './todo-hygiene';
@@ -22,9 +26,26 @@ describe('createTodoContinuationHook', () => {
         parts?: Array<{ type?: string; text?: string }>;
       }>;
     };
+    providersResult?: {
+      data?: {
+        providers?: Array<{
+          id: string;
+          models?: Record<string, { limit?: { context?: number } }>;
+        }>;
+      };
+    };
   }) {
     return {
+      directory: '/repo',
       client: {
+        config: {
+          providers: mock(
+            async () =>
+              overrides?.providersResult ?? {
+                data: { providers: [] },
+              },
+          ),
+        },
         session: {
           todo: mock(async () => overrides?.todoResult ?? { data: [] }),
           messages: mock(async () => overrides?.messagesResult ?? { data: [] }),
@@ -92,6 +113,49 @@ describe('createTodoContinuationHook', () => {
       .filter((part) => part.type === 'text' && typeof part.text === 'string')
       .map((part) => part.text)
       .join('\n');
+  }
+
+  function providersWithContextLimit(context?: number) {
+    return {
+      data: {
+        providers: [
+          {
+            id: 'openai',
+            models: {
+              'gpt-5.5': context ? { limit: { context } } : {},
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  async function sendContextUsage(
+    hook: ReturnType<typeof createTodoContinuationHook>,
+    input: {
+      sessionID: string;
+      agent: string;
+      input: number;
+      cacheRead?: number;
+    },
+  ) {
+    await hook.handleEvent({
+      event: {
+        type: 'message.updated',
+        properties: {
+          info: {
+            sessionID: input.sessionID,
+            agent: input.agent,
+            providerID: 'openai',
+            modelID: 'gpt-5.5',
+            tokens: {
+              input: input.input,
+              cache: { read: input.cacheRead ?? 0 },
+            },
+          },
+        },
+      },
+    });
   }
 
   describe('tool toggle', () => {
@@ -648,6 +712,155 @@ describe('createTodoContinuationHook', () => {
 
       expect(allMessageText(output)).toContain(TODO_FINAL_ACTIVE_REMINDER);
       expect(allMessageText(output)).not.toContain(TODO_HYGIENE_REMINDER);
+    });
+  });
+
+  describe('subagent context hygiene', () => {
+    test('injects cache-friendly context warning for subagents over configured context limit after tool use', async () => {
+      const ctx = createMockContext({
+        providersResult: providersWithContextLimit(1000),
+      });
+      const hook = createTodoContinuationHook(ctx);
+      const output = userMessages('review this diff', 'sub1', 'oracle');
+
+      hook.handleChatMessage({ sessionID: 'sub1', agent: 'oracle' });
+      await hook.handleMessagesTransform(output);
+      await sendContextUsage(hook, {
+        sessionID: 'sub1',
+        agent: 'oracle',
+        input: 500,
+        cacheRead: 75,
+      });
+      await hook.handleToolExecuteAfter({ tool: 'read', sessionID: 'sub1' });
+      await hook.handleMessagesTransform(output);
+
+      expect(allMessageText(output)).toContain(
+        SUBAGENT_CONTEXT_HYGIENE_REMINDER,
+      );
+      expect(allMessageText(output)).toContain(
+        SUBAGENT_CONTEXT_HYGIENE_INSTRUCTION_OPEN,
+      );
+    });
+
+    test('does not inject context warning when model has no configured context limit', async () => {
+      const ctx = createMockContext({
+        providersResult: providersWithContextLimit(),
+      });
+      const hook = createTodoContinuationHook(ctx);
+      const output = userMessages('review this diff', 'sub1', 'oracle');
+
+      hook.handleChatMessage({ sessionID: 'sub1', agent: 'oracle' });
+      await hook.handleMessagesTransform(output);
+      await sendContextUsage(hook, {
+        sessionID: 'sub1',
+        agent: 'oracle',
+        input: 900,
+        cacheRead: 100,
+      });
+      await hook.handleToolExecuteAfter({ tool: 'read', sessionID: 'sub1' });
+      await hook.handleMessagesTransform(output);
+
+      expect(allMessageText(output)).not.toContain(
+        SUBAGENT_CONTEXT_HYGIENE_REMINDER,
+      );
+    });
+
+    test('does not warn resumed high-context subagent until it uses another tool', async () => {
+      const ctx = createMockContext({
+        providersResult: providersWithContextLimit(1000),
+      });
+      const hook = createTodoContinuationHook(ctx);
+      const output = userMessages('continue previous review', 'sub1', 'oracle');
+
+      hook.handleChatMessage({ sessionID: 'sub1', agent: 'oracle' });
+      await hook.handleMessagesTransform(output);
+      await sendContextUsage(hook, {
+        sessionID: 'sub1',
+        agent: 'oracle',
+        input: 700,
+      });
+      await hook.handleMessagesTransform(output);
+
+      expect(allMessageText(output)).not.toContain(
+        SUBAGENT_CONTEXT_HYGIENE_REMINDER,
+      );
+
+      await hook.handleToolExecuteAfter({ tool: 'grep', sessionID: 'sub1' });
+      await hook.handleMessagesTransform(output);
+
+      expect(allMessageText(output)).toContain(
+        SUBAGENT_CONTEXT_HYGIENE_REMINDER,
+      );
+    });
+
+    test('does not duplicate context warning in same transformed payload', async () => {
+      const ctx = createMockContext({
+        providersResult: providersWithContextLimit(1000),
+      });
+      const hook = createTodoContinuationHook(ctx);
+      const output = userMessages('review this diff', 'sub1', 'oracle');
+
+      hook.handleChatMessage({ sessionID: 'sub1', agent: 'oracle' });
+      await hook.handleMessagesTransform(output);
+      await sendContextUsage(hook, {
+        sessionID: 'sub1',
+        agent: 'oracle',
+        input: 600,
+      });
+      await hook.handleToolExecuteAfter({ tool: 'read', sessionID: 'sub1' });
+      await hook.handleMessagesTransform(output);
+      await hook.handleToolExecuteAfter({ tool: 'glob', sessionID: 'sub1' });
+      await hook.handleMessagesTransform(output);
+
+      expect(
+        allMessageText(output).split(SUBAGENT_CONTEXT_HYGIENE_REMINDER).length -
+          1,
+      ).toBe(1);
+    });
+
+    test('strips only the exact generated context warning block', async () => {
+      const ctx = createMockContext();
+      const hook = createTodoContinuationHook(ctx);
+      const userText = [
+        'custom prompt',
+        '',
+        '<instruction name="subagent_context_hygiene">',
+        'User-authored instruction that must stay.',
+        '</instruction>',
+      ].join('\n');
+      const output = userMessages(userText, 'sub1', 'oracle');
+
+      hook.handleChatMessage({ sessionID: 'sub1', agent: 'oracle' });
+      await hook.handleMessagesTransform(output);
+
+      expect(allMessageText(output)).toContain(
+        'User-authored instruction that must stay.',
+      );
+      expect(allMessageText(output)).not.toContain(
+        SUBAGENT_CONTEXT_HYGIENE_REMINDER,
+      );
+    });
+
+    test('never injects context warning into orchestrator sessions', async () => {
+      const ctx = createMockContext({
+        providersResult: providersWithContextLimit(1000),
+      });
+      const hook = createTodoContinuationHook(ctx);
+      const output = userMessages('do work', 'main1', 'orchestrator');
+
+      hook.handleChatMessage({ sessionID: 'main1', agent: 'orchestrator' });
+      await hook.handleMessagesTransform(output);
+      await sendContextUsage(hook, {
+        sessionID: 'main1',
+        agent: 'orchestrator',
+        input: 700,
+      });
+      await hook.handleToolExecuteAfter({ tool: 'read', sessionID: 'main1' });
+      await hook.handleMessagesTransform(output);
+
+      expect(allMessageText(output)).not.toContain(
+        SUBAGENT_CONTEXT_HYGIENE_REMINDER,
+      );
     });
   });
 

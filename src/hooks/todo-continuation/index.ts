@@ -6,6 +6,7 @@ import {
   SLIM_INTERNAL_INITIATOR_MARKER,
   withTimeout,
 } from '../../utils';
+import { createSubagentContextHygiene } from './subagent-context-hygiene';
 import { createTodoHygiene } from './todo-hygiene';
 
 const HOOK_NAME = 'todo-continuation';
@@ -200,6 +201,7 @@ export function createTodoContinuationHook(
   const autoEnable = config?.autoEnable ?? false;
   const autoEnableThreshold = config?.autoEnableThreshold ?? 4;
   const requestSignatureBySession = new Map<string, string>();
+  const contextLimitByModel = new Map<string, number | undefined>();
 
   const state: ContinuationState = {
     enabled: false,
@@ -242,6 +244,49 @@ export function createTodoContinuationHook(
       };
     },
     shouldInject: (sessionID) => isOrchestratorSession(sessionID),
+    log: (message, meta) => log(`[${HOOK_NAME}] ${message}`, meta),
+  });
+
+  const subagentContextHygiene = createSubagentContextHygiene({
+    getContextLimit: async (providerID, modelID) => {
+      const key = `${providerID}/${modelID}`;
+      if (contextLimitByModel.has(key)) {
+        return contextLimitByModel.get(key);
+      }
+
+      try {
+        const result = await ctx.client.config.providers();
+        const providers =
+          (
+            result.data as
+              | {
+                  providers?: Array<{
+                    id: string;
+                    models?: Record<string, { limit?: { context?: unknown } }>;
+                  }>;
+                }
+              | undefined
+          )?.providers ?? [];
+        const provider = providers.find((entry) => entry.id === providerID);
+        const context = provider?.models?.[modelID]?.limit?.context;
+        const limit =
+          typeof context === 'number' && Number.isFinite(context) && context > 0
+            ? context
+            : undefined;
+        contextLimitByModel.set(key, limit);
+        return limit;
+      } catch (error) {
+        log(
+          `[${HOOK_NAME}] Skipped subagent context hygiene: failed to fetch providers`,
+          {
+            providerID,
+            modelID,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+        return undefined;
+      }
+    },
     log: (message, meta) => log(`[${HOOK_NAME}] ${message}`, meta),
   });
 
@@ -349,6 +394,8 @@ export function createTodoContinuationHook(
       return;
     }
 
+    await subagentContextHygiene.handleMessagesTransform(output);
+
     if (lastUserMessage.agent && lastUserMessage.agent !== 'orchestrator') {
       return;
     }
@@ -435,6 +482,7 @@ export function createTodoContinuationHook(
       return;
     }
 
+    subagentContextHygiene.handleChatMessage(input);
     state.sawChatMessage = true;
     if (input.agent === 'orchestrator') {
       registerOrchestratorSession(input.sessionID);
@@ -468,6 +516,26 @@ export function createTodoContinuationHook(
   }): Promise<void> {
     const { event } = input;
     const properties = event.properties ?? {};
+
+    await subagentContextHygiene.handleEvent({
+      type: event.type,
+      properties: {
+        info: properties.info as
+          | {
+              id?: string;
+              sessionID?: string;
+              agent?: string;
+              providerID?: string;
+              modelID?: string;
+              tokens?: {
+                input?: unknown;
+                cache?: { read?: unknown };
+              };
+            }
+          | undefined,
+        sessionID: properties.sessionID as string | undefined,
+      },
+    });
 
     hygiene.handleEvent({
       type: event.type,
@@ -870,7 +938,10 @@ export function createTodoContinuationHook(
 
   return {
     tool: { auto_continue: autoContinue },
-    handleToolExecuteAfter: hygiene.handleToolExecuteAfter,
+    handleToolExecuteAfter: async (input, output) => {
+      await hygiene.handleToolExecuteAfter(input, output);
+      await subagentContextHygiene.handleToolExecuteAfter(input);
+    },
     handleMessagesTransform,
     handleEvent,
     handleChatMessage,
