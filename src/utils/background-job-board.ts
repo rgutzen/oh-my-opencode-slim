@@ -165,6 +165,8 @@ export class BackgroundJobBoard {
     const now = input.now ?? Date.now();
     const terminal = TERMINAL_STATES.has(input.state);
     const notifyTerminal = terminal && !TERMINAL_STATES.has(existing.state);
+    const notifyTimedOut =
+      input.state === 'running' && input.timedOut && !existing.timedOut;
     const updated: BackgroundJobRecord = {
       ...existing,
       state: input.state,
@@ -182,7 +184,9 @@ export class BackgroundJobBoard {
 
     this.jobs.set(input.taskID, updated);
     this.trimReusable(input.taskID);
-    if (notifyTerminal) this.terminalStateListener?.(input.taskID);
+    if (notifyTerminal || notifyTimedOut) {
+      this.terminalStateListener?.(input.taskID);
+    }
     return updated;
   }
 
