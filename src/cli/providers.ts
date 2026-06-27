@@ -5,7 +5,13 @@ import type { InstallConfig } from './types';
 const SCHEMA_URL =
   'https://unpkg.com/oh-my-opencode-slim@latest/oh-my-opencode-slim.schema.json';
 
-export const GENERATED_PRESETS = ['openai', 'opencode-go'] as const;
+export const GENERATED_PRESETS = [
+  'openai',
+  'opencode-go',
+  'claude',
+  'oss-openai',
+  'oss-claude',
+] as const;
 
 // Model mappings by provider/preset.
 export const MODEL_MAPPINGS = {
@@ -54,6 +60,36 @@ export const MODEL_MAPPINGS = {
     fixer: { model: 'opencode-go/deepseek-v4-flash', variant: 'high' },
     observer: { model: 'opencode-go/kimi-k2.6' },
   },
+  claude: {
+    orchestrator: { model: 'anthropic/claude-fable-5', variant: 'medium' },
+    oracle: { model: 'anthropic/claude-opus-4-8', variant: 'high' },
+    council: { model: 'anthropic/claude-opus-4-8', variant: 'high' },
+    librarian: { model: 'anthropic/claude-haiku-4-5', variant: 'low' },
+    explorer: { model: 'anthropic/claude-haiku-4-5', variant: 'low' },
+    designer: { model: 'anthropic/claude-sonnet-4-6', variant: 'medium' },
+    fixer: { model: 'anthropic/claude-sonnet-4-6', variant: 'low' },
+    observer: { model: 'anthropic/claude-sonnet-4-6' },
+  },
+  'oss-openai': {
+    orchestrator: { model: 'openai/gpt-5.5', variant: 'medium' },
+    oracle: { model: 'openai/gpt-5.5', variant: 'high' },
+    council: { model: 'openai/gpt-5.5', variant: 'high' },
+    librarian: { model: 'opencode-go/glm-5.2', variant: 'low' },
+    explorer: { model: 'opencode-go/glm-5.2', variant: 'low' },
+    designer: { model: 'opencode-go/glm-5.2', variant: 'medium' },
+    fixer: { model: 'opencode-go/glm-5.2', variant: 'low' },
+    observer: { model: 'opencode-go/glm-5.2' },
+  },
+  'oss-claude': {
+    orchestrator: { model: 'anthropic/claude-fable-5', variant: 'medium' },
+    oracle: { model: 'anthropic/claude-opus-4-8', variant: 'high' },
+    council: { model: 'anthropic/claude-opus-4-8', variant: 'high' },
+    librarian: { model: 'opencode-go/glm-5.2', variant: 'low' },
+    explorer: { model: 'opencode-go/glm-5.2', variant: 'low' },
+    designer: { model: 'opencode-go/glm-5.2', variant: 'medium' },
+    fixer: { model: 'opencode-go/glm-5.2', variant: 'low' },
+    observer: { model: 'opencode-go/glm-5.2' },
+  },
 } as const;
 
 export type PresetName = keyof typeof MODEL_MAPPINGS;
@@ -93,7 +129,7 @@ export function generateLiteConfig(
     presets: {},
   };
 
-  if (preset === 'opencode-go') {
+  if (Object.hasOwn(MODEL_MAPPINGS[preset as PresetName], 'observer')) {
     config.disabled_agents = [];
   }
 
