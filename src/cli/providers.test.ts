@@ -7,10 +7,13 @@ describe('providers', () => {
   test('MODEL_MAPPINGS includes supported providers', () => {
     const keys = Object.keys(MODEL_MAPPINGS);
     expect(keys.sort()).toEqual([
+      'cheap',
       'claude',
+      'claude-fast',
       'copilot',
       'kimi',
       'openai',
+      'openai-fast',
       'opencode-go',
       'oss-claude',
       'oss-openai',
@@ -21,10 +24,13 @@ describe('providers', () => {
   test('GENERATED_PRESETS includes bundled generated configs', () => {
     expect(GENERATED_PRESETS).toEqual([
       'openai',
+      'openai-fast',
       'opencode-go',
       'claude',
+      'claude-fast',
       'oss-openai',
       'oss-claude',
+      'cheap',
     ]);
   });
 
@@ -46,13 +52,15 @@ describe('providers', () => {
       'opencode-go/kimi-k2.6',
     );
     expect((config.presets as any).claude).toBeDefined();
+    expect((config.presets as any)['openai-fast']).toBeDefined();
+    expect((config.presets as any)['claude-fast']).toBeDefined();
     expect((config.presets as any)['oss-openai']).toBeDefined();
     expect((config.presets as any)['oss-claude']).toBeDefined();
     const agents = (config.presets as any).openai;
     expect(agents).toBeDefined();
     expect(agents.orchestrator.model).toBe('openai/gpt-5.5');
     expect(agents.orchestrator.variant).toBe('medium');
-    expect(agents.fixer.model).toBe('openai/gpt-5.5');
+    expect(agents.fixer.model).toBe('openai/gpt-5.4-mini-fast');
     expect(agents.fixer.variant).toBe('low');
   });
 
@@ -70,11 +78,11 @@ describe('providers', () => {
     );
     expect(agents.oracle.model).toBe('openai/gpt-5.5');
     expect(agents.oracle.variant).toBe('high');
-    expect(agents.librarian.model).toBe('openai/gpt-5.4-mini');
+    expect(agents.librarian.model).toBe('openai/gpt-5.4-mini-fast');
     expect(agents.librarian.variant).toBe('low');
-    expect(agents.explorer.model).toBe('openai/gpt-5.4-mini');
+    expect(agents.explorer.model).toBe('openai/gpt-5.4-mini-fast');
     expect(agents.explorer.variant).toBe('low');
-    expect(agents.designer.model).toBe('openai/gpt-5.4-mini');
+    expect(agents.designer.model).toBe('openai/gpt-5.4-mini-fast');
     expect(agents.designer.variant).toBe('medium');
   });
 
@@ -131,6 +139,64 @@ describe('providers', () => {
     expect(agents.observer.model).toBe('anthropic/claude-sonnet-4-6');
   });
 
+  test('generateLiteConfig can set openai-fast as active preset', () => {
+    const config = generateLiteConfig({
+      hasTmux: false,
+      installCustomSkills: false,
+      preset: 'openai-fast',
+      reset: false,
+    });
+
+    expect(config.preset).toBe('openai-fast');
+    expect(config.disabled_agents).toBeUndefined();
+    const agents = (config.presets as any)['openai-fast'];
+    expect(agents.orchestrator.model).toBe('openai/gpt-5.5-fast');
+    expect(agents.orchestrator.variant).toBe('medium');
+    expect(agents.oracle.model).toBe('openai/gpt-5.5-fast');
+    expect(agents.oracle.variant).toBe('high');
+    expect(agents.librarian.model).toBe('openai/gpt-5.4-mini-fast');
+    expect(agents.librarian.variant).toBe('low');
+    expect(agents.explorer.model).toBe('openai/gpt-5.5-fast');
+    expect(agents.explorer.variant).toBe('low');
+    expect(agents.designer.model).toBe('openai/gpt-5.5-fast');
+    expect(agents.designer.variant).toBe('medium');
+    expect(agents.fixer.model).toBe('openai/gpt-5.4-mini-fast');
+    expect(agents.fixer.variant).toBe('low');
+    expect(JSON.stringify(agents)).not.toContain('openai/gpt-5.4"');
+    expect(JSON.stringify(agents)).toContain('openai/gpt-5.5-fast');
+  });
+
+  test('generateLiteConfig can set claude-fast as active preset', () => {
+    const config = generateLiteConfig({
+      hasTmux: false,
+      installCustomSkills: false,
+      preset: 'claude-fast',
+      reset: false,
+    });
+
+    expect(config.preset).toBe('claude-fast');
+    expect(config.disabled_agents).toEqual([]);
+    const agents = (config.presets as any)['claude-fast'];
+    expect(agents.orchestrator.model).toBe('anthropic/claude-haiku-4-5');
+    expect(agents.orchestrator.variant).toBe('medium');
+    expect(agents.oracle.model).toBe('anthropic/claude-haiku-4-5');
+    expect(agents.oracle.variant).toBe('high');
+    expect(agents.council.model).toBe('anthropic/claude-haiku-4-5');
+    expect(agents.council.variant).toBe('high');
+    expect(agents.librarian.model).toBe('anthropic/claude-haiku-4-5');
+    expect(agents.librarian.variant).toBe('low');
+    expect(agents.explorer.model).toBe('anthropic/claude-haiku-4-5');
+    expect(agents.explorer.variant).toBe('low');
+    expect(agents.designer.model).toBe('anthropic/claude-haiku-4-5');
+    expect(agents.designer.variant).toBe('medium');
+    expect(agents.fixer.model).toBe('anthropic/claude-haiku-4-5');
+    expect(agents.fixer.variant).toBe('low');
+    expect(agents.observer.model).toBe('anthropic/claude-haiku-4-5');
+    expect(JSON.stringify(agents)).not.toContain('sonnet-4-6');
+    expect(JSON.stringify(agents)).not.toContain('opus-4-8');
+    expect(JSON.stringify(agents)).not.toContain('fable-5');
+  });
+
   test('generateLiteConfig can set oss-openai as active preset', () => {
     const config = generateLiteConfig({
       hasTmux: false,
@@ -150,10 +216,10 @@ describe('providers', () => {
     expect(agents.council.variant).toBe('high');
     expect(agents.librarian.model).toBe('opencode-go/glm-5.2');
     expect(agents.librarian.variant).toBe('low');
-    expect(agents.explorer.model).toBe('opencode-go/glm-5.2');
-    expect(agents.designer.model).toBe('opencode-go/glm-5.2');
+    expect(agents.explorer.model).toBe('openai/gpt-5.4');
+    expect(agents.designer.model).toBe('openai/gpt-5.4');
     expect(agents.designer.variant).toBe('medium');
-    expect(agents.fixer.model).toBe('opencode-go/glm-5.2');
+    expect(agents.fixer.model).toBe('openai/gpt-5.4-mini-fast');
     expect(agents.fixer.variant).toBe('low');
     expect(agents.observer.model).toBe('opencode-go/glm-5.2');
   });
@@ -183,6 +249,33 @@ describe('providers', () => {
     expect(agents.fixer.model).toBe('opencode-go/glm-5.2');
     expect(agents.fixer.variant).toBe('low');
     expect(agents.observer.model).toBe('opencode-go/glm-5.2');
+  });
+
+  test('generateLiteConfig can set cheap as active preset', () => {
+    const config = generateLiteConfig({
+      hasTmux: false,
+      installCustomSkills: false,
+      preset: 'cheap',
+      reset: false,
+    });
+
+    expect(config.preset).toBe('cheap');
+    expect(config.disabled_agents).toEqual([]);
+    const agents = (config.presets as any)['cheap'];
+    expect(agents.orchestrator.model).toBe('openai/gpt-5.4-mini');
+    expect(agents.orchestrator.variant).toBe('medium');
+    expect(agents.oracle.model).toBe('openai/gpt-5.4-mini');
+    expect(agents.oracle.variant).toBe('high');
+    expect(agents.council.model).toBe('openai/gpt-5.4-mini');
+    expect(agents.council.variant).toBe('high');
+    expect(agents.librarian.model).toBe('openai/gpt-5.4-mini');
+    expect(agents.librarian.variant).toBe('low');
+    expect(agents.explorer.model).toBe('openai/gpt-5.4-mini');
+    expect(agents.fixer.model).toBe('openai/gpt-5.4-mini');
+    expect(agents.fixer.variant).toBe('low');
+    expect(agents.observer.model).toBe('openai/gpt-5.4-mini');
+    expect(JSON.stringify(agents)).not.toContain('gpt-5.5');
+    expect(JSON.stringify(agents)).not.toContain('claude');
   });
 
   test('generateLiteConfig rejects unsupported preset', () => {
