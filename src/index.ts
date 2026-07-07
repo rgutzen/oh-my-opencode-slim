@@ -139,6 +139,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
   let multiplexerSessionManager: MultiplexerSessionManager;
   let autoUpdateChecker: ReturnType<typeof createAutoUpdateCheckerHook>;
   let sessionAgentMap: Map<string, string>;
+  let deepworkSessions: Set<string>;
   let sessionLifecycle: SessionLifecycle;
 
   let chatHeadersHook: ReturnType<typeof createChatHeadersHook>;
@@ -289,6 +290,10 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
     // Track session → agent mapping for serve-mode system prompt injection
     sessionAgentMap = new Map<string, string>();
 
+    // Track sessions that have a deepwork file (.slim/deepwork/*.md).
+    // Phase reminders are only injected when a deepwork session is active.
+    deepworkSessions = new Set<string>();
+
     chatHeadersHook = createChatHeadersHook(ctx);
 
     // Initialize foreground fallback manager for runtime model switching.
@@ -346,13 +351,17 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
       };
     };
 
-    phaseReminder = createPhaseReminderHook(sessionLifecycle);
+    phaseReminder = createPhaseReminderHook({
+      shouldInject: (sessionID) => deepworkSessions.has(sessionID),
+      coordinator: sessionLifecycle,
+    });
 
     filterAvailableSkills = createFilterAvailableSkillsHook(ctx, config);
 
     postFileToolNudge = createPostFileToolNudgeHook({
       shouldInject: (sessionID) =>
-        sessionAgentMap.get(sessionID) === 'orchestrator',
+        sessionAgentMap.get(sessionID) === 'orchestrator' &&
+        deepworkSessions.has(sessionID),
       coordinator: sessionLifecycle,
     });
 
@@ -943,6 +952,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         }
         if (sessionID) {
           sessionAgentMap.delete(sessionID);
+          deepworkSessions.delete(sessionID);
         }
       }
     },
@@ -982,6 +992,16 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
         },
         output as { parts: Array<{ type: string; text?: string }> },
       );
+
+      // Mark the session as a deepwork session so phase/post-file-tool-nudge
+      // reminders are enabled for the orchestrator.
+      if (
+        input.command === 'deepwork' &&
+        input.arguments.trim().length > 0 &&
+        input.sessionID
+      ) {
+        deepworkSessions.add(input.sessionID);
+      }
 
       await reflectCommandHook.handleCommandExecuteBefore(
         input as {

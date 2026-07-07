@@ -12,12 +12,28 @@ import { isUserMessageWithParts } from '../types';
 
 export { PHASE_REMINDER };
 
+interface PhaseReminderOptions {
+  /** If provided, only inject when this returns true for the session. */
+  shouldInject?: (sessionID: string) => boolean;
+  coordinator?: SessionLifecycle;
+}
+
 /**
  * Creates the experimental.chat.messages.transform hook for phase reminder injection.
  * This hook runs right before sending to API, so it doesn't affect UI display.
  * Only injects for the orchestrator agent.
  */
-export function createPhaseReminderHook(coordinator?: SessionLifecycle) {
+export function createPhaseReminderHook(
+  options: PhaseReminderOptions | SessionLifecycle = {},
+) {
+  // Backward-compatible: if called with a SessionLifecycle directly, treat as coordinator
+  const opts: PhaseReminderOptions =
+    typeof options === 'object' && 'coordinator' in options
+      ? (options as PhaseReminderOptions)
+      : typeof options === 'object' && 'onSessionDeleted' in options
+        ? { coordinator: options as SessionLifecycle }
+        : {};
+  const { coordinator, shouldInject } = opts;
   return {
     'experimental.chat.messages.transform': async (
       _input: Record<string, never>,
@@ -51,10 +67,14 @@ export function createPhaseReminderHook(coordinator?: SessionLifecycle) {
         return;
       }
 
-      // If post-file-tool-nudge is pending for this session, it handles
-      // injection via system prompt — skip message-level injection.
       const sessionId = (lastUserMessage as { info?: { sessionID?: string } })
         ?.info?.sessionID;
+      if (sessionId && shouldInject && !shouldInject(sessionId)) {
+        return;
+      }
+
+      // If post-file-tool-nudge is pending for this session, it handles
+      // injection via system prompt — skip message-level injection.
       if (sessionId && coordinator?.hasPendingSession(sessionId)) {
         return;
       }
