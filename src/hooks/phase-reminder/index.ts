@@ -28,11 +28,9 @@ export function createPhaseReminderHook(
 ) {
   // Backward-compatible: if called with a SessionLifecycle directly, treat as coordinator
   const opts: PhaseReminderOptions =
-    typeof options === 'object' && 'coordinator' in options
-      ? (options as PhaseReminderOptions)
-      : typeof options === 'object' && 'onSessionDeleted' in options
-        ? { coordinator: options as SessionLifecycle }
-        : {};
+    typeof options === 'object' && 'onSessionDeleted' in options
+      ? { coordinator: options as SessionLifecycle }
+      : (options as PhaseReminderOptions);
   const { coordinator, shouldInject } = opts;
   return {
     'experimental.chat.messages.transform': async (
@@ -69,7 +67,7 @@ export function createPhaseReminderHook(
 
       const sessionId = (lastUserMessage as { info?: { sessionID?: string } })
         ?.info?.sessionID;
-      if (sessionId && shouldInject && !shouldInject(sessionId)) {
+      if (shouldInject && (!sessionId || !shouldInject(sessionId))) {
         return;
       }
 

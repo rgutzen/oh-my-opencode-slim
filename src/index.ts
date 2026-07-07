@@ -290,7 +290,7 @@ const OhMyOpenCodeLite: Plugin = async (ctx) => {
     // Track session → agent mapping for serve-mode system prompt injection
     sessionAgentMap = new Map<string, string>();
 
-    // Track sessions that have a deepwork file (.slim/deepwork/*.md).
+    // Track sessions where /deepwork was invoked this run.
     // Phase reminders are only injected when a deepwork session is active.
     deepworkSessions = new Set<string>();
 
